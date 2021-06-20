@@ -36,14 +36,14 @@ int main() {
   double sigma_pos [3] = {0.3, 0.3, 0.01};
   // Landmark measurement uncertainty [x [m], y [m]]
   double sigma_landmark [2] = {0.3, 0.3};
-
+//std::cout << "I was here 30"<< std::endl;
   // Read map data
   Map map;
   if (!read_map_data("../data/map_data.txt", map)) {
     std::cout << "Error: Could not open map file" << std::endl;
     return -1;
   }
-
+//std::cout << "I was here 31"<<std::endl;
   // Create particle filter
   ParticleFilter pf;
 
@@ -53,16 +53,18 @@ int main() {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
+                //std::cout << "I was here 26" << std::endl;
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
       auto s = hasData(string(data));
-
+//std::cout << "I was here 126" << std::endl;
       if (s != "") {
         auto j = json::parse(s);
-
+//std::cout << "I was here 226" << std::endl;
         string event = j[0].get<string>();
         
         if (event == "telemetry") {
           // j[1] is the data JSON object
+          std::cout << "I was here 24" << std::endl;
           if (!pf.initialized()) {
             // Sense noisy position data from the simulator
             double sense_x = std::stod(j[1]["sense_x"].get<string>());
@@ -70,6 +72,7 @@ int main() {
             double sense_theta = std::stod(j[1]["sense_theta"].get<string>());
 
             pf.init(sense_x, sense_y, sense_theta, sigma_pos);
+            //std::cout << "I was here 23" << std::endl; 
           } else {
             // Predict the vehicle's next state from previous 
             //   (noiseless control) data.
@@ -77,8 +80,9 @@ int main() {
             double previous_yawrate = std::stod(j[1]["previous_yawrate"].get<string>());
 
             pf.prediction(delta_t, sigma_pos, previous_velocity, previous_yawrate);
+            //std::cout << "I was here 25" << std::endl;
           }
-
+		  
           // receive noisy observation data from the simulator
           // sense_observations in JSON format 
           //   [{obs_x,obs_y},{obs_x,obs_y},...{obs_x,obs_y}] 
@@ -109,6 +113,7 @@ int main() {
 
           // Update the weights and resample
           pf.updateWeights(sensor_range, sigma_landmark, noisy_observations, map);
+          //std::cout << "I was here 26" << std::endl;
           pf.resample();
 
           // Calculate and output the average weighted error of the particle 
@@ -129,39 +134,42 @@ int main() {
 
           std::cout << "highest w " << highest_weight << std::endl;
           std::cout << "average w " << weight_sum/num_particles << std::endl;
-
+			//std::cout << "I was here 21" << std::endl;
           json msgJson;
           msgJson["best_particle_x"] = best_particle.x;
           msgJson["best_particle_y"] = best_particle.y;
           msgJson["best_particle_theta"] = best_particle.theta;
-
+//std::cout << "I was here 22" << std::endl;
           // Optional message data used for debugging particle's sensing 
           //   and associations
           msgJson["best_particle_associations"] = pf.getAssociations(best_particle);
           msgJson["best_particle_sense_x"] = pf.getSenseCoord(best_particle, "X");
           msgJson["best_particle_sense_y"] = pf.getSenseCoord(best_particle, "Y");
-
+//std::cout << "I was here 27" << std::endl;
           auto msg = "42[\"best_particle\"," + msgJson.dump() + "]";
+ //std::cout << "I was here 28" << std::endl;         
           // std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+         std::cout << "I was here 29" << std::endl;
         }  // end "telemetry" if
       } else {
         string msg = "42[\"manual\",{}]";
         ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+        // std::cout << "I was here 99"<< std::endl;
       }
     }  // end websocket message if
   }); // end h.onMessage
-
+ //std::cout << "I was here 39" << std::endl;
   h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
     std::cout << "Connected!!!" << std::endl;
   });
-
+ //std::cout << "I was here 49" << std::endl;
   h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code, 
                          char *message, size_t length) {
     ws.close();
     std::cout << "Disconnected" << std::endl;
   });
-
+ //std::cout << "I was here 59" << std::endl;
   int port = 4567;
   if (h.listen(port)) {
     std::cout << "Listening to port " << port << std::endl;
@@ -169,6 +177,6 @@ int main() {
     std::cerr << "Failed to listen to port" << std::endl;
     return -1;
   }
-  
+   //std::cout << "I was here 69" << std::endl;
   h.run();
 }
