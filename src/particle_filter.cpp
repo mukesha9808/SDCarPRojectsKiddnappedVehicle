@@ -34,25 +34,31 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
    * NOTE: Consult particle_filter.h for more information about this method 
    *   (and others in this file).
    */
-  num_particles = (std[0]/0.01)*(std[1]/0.01);  // TODO: Set the number of particles
-
-  // randon gaussian distrubation for gps input as first data
-  std::normal_distribution<double> dist_x(0, std[0]);
-  std::normal_distribution<double> dist_y(0, std[1]);
-  std::normal_distribution<double> dist_theta(0, std[2]);
   
+  /* Choosing number of particles 
+  Error in position 0.3m, 0.3m, 0.01 rad
+  desired accuracy  0.01, 0.01, 0.01 rad
+  taking twice the particle in each dimension to calculate desired numer of particles*/
+  num_particles = (std[0]/0.05)*(std[1]/0.05)*(std[2]/0.005);  // TODO: Set the number of particles
+ 
   //Initialise particles
   for(int i=0; i< num_particles; ++i){
     Particle prtcl;
-   	prtcl.id=i;
-    prtcl.x=x + dist_x(gen);
-    prtcl.y=y + dist_y(gen);
-    prtcl.theta=theta + dist_theta(gen);
+    // randon gaussian distrubation for gps input as first data
+    std::normal_distribution<double> dist_x(x, std[0]);
+    std::normal_distribution<double> dist_y(y, std[1]);
+    std::normal_distribution<double> dist_theta(theta, std[2]);
+  
+    //Define particles
+    prtcl.id=i;
+    prtcl.x=dist_x(gen);
+    prtcl.y=dist_y(gen);
+    prtcl.theta=dist_theta(gen);
     prtcl.weight=1;
-  	
+  
     particles.push_back(prtcl);
   }
-
+  //Initialisation complete
   is_initialized=true;
 }
 
@@ -65,43 +71,34 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
    *  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
    *  http://www.cplusplus.com/reference/random/default_random_engine/
    */
-  // randon gaussian distrubation for noise
-  
-  //predict particles
-  for(unsigned int i=0; i< particles.size(); ++i){
 
-    std::normal_distribution<double> dist_theta(yaw_rate, std_pos[2]);
+  //Predict next position of each particle
+  for(unsigned int i=0; i< particles.size(); ++i){
+    
     double temp_x;
     double temp_y;
-    double noisy_yawrate=  dist_theta(gen);
-    double theta1=particles[i].theta +(noisy_yawrate*delta_t); //+ theta_noise;
-
+    double temp_theta=particles[i].theta +(yaw_rate*delta_t);
     
-    if (fabs(noisy_yawrate) > 1.0e-5){
-      temp_x=particles[i].x + ((sin(theta1)-sin(particles[i].theta))*velocity/noisy_yawrate);
-      temp_y=particles[i].y + ((cos(particles[i].theta)-cos(theta1))*velocity/noisy_yawrate);
+    //Calculate position states
+    if (fabs(yaw_rate) > 1.0e-5){
+      temp_x=particles[i].x + ((sin(temp_theta)-sin(particles[i].theta))*velocity/yaw_rate);
+      temp_y=particles[i].y + ((cos(particles[i].theta)-cos(temp_theta))*velocity/yaw_rate);
 //std::cout << "I was here 21" << std::endl;
     } else{
       temp_x=particles[i].x + (velocity*delta_t*cos(particles[i].theta));
       temp_y=particles[i].y + (velocity*delta_t*sin(particles[i].theta));
  		//std::cout << "I was here 20" << std::endl;
     }
-     
-    particles[i].theta=theta1 ; 
-    //std::cout << "I was here 19" << std::endl;
+      
+    //Adding gaussian noise to position vector
     std::normal_distribution<double> dist_x(temp_x, std_pos[0]);
     std::normal_distribution<double> dist_y(temp_y, std_pos[1]);
-    
+    std::normal_distribution<double> dist_theta(temp_theta, std_pos[2]);
+
     particles[i].x=dist_x(gen);
     particles[i].y=dist_y(gen);
-    
+    particles[i].theta=dist_theta(gen) ;     
   }
-  
-  //std::cout << "theta" << particles[0].theta  <<  std::endl;
-  //std::cout << "noise   ("<< ((sin(particles[0].theta +(yaw_rate*delta_t) + theta_noise)-sin(particles[0].theta))*velocity/yaw_rate)<< " ," << ((cos(particles[0].theta)-cos(particles[0].theta +(yaw_rate*delta_t) + theta_noise))*velocity/yaw_rate)<<"," << theta_noise <<")" << std::endl;
-  //std::cout << "vel, thetha   ("<< velocity << " ," << yaw_rate<<"," << delta_t<<")" << std::endl;
-  //std::cout << "xy vale   ("<< particles[0].x << " ," << particles[0].y << "," << particles[0].theta <<")" << std::endl;
-
 }
 
 void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted, 
@@ -114,25 +111,39 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    *   probably find it useful to implement this method and use it as a helper 
    *   during the updateWeights phase.
    */
-  // Variable to store shortest distance from observation and index of observation
+  
+  /* To find associated data first we need to find all observation near particular landmark
+  and then we have to find nearest neighbor among those observation.
+  
+  My solution  first run through all observation and find closest landmark to this observation
+  I have created two array of vector distance and index size of array is same as landmark.
+  Once closest landmark is found, I push index of observation and distance to landmark at array 
+  position of landmark. This way all landmarks will have observation corresponding to this landmark.
+  
+  Now I traverse through each landmark index in array and find nearest observation to this landmark 
+  and asssociate observation to landmark
+  */
+  
   //Local valid associated observations
   vector<LandmarkObs> validobs;
   
-   // Variable to store shortest distance from observation and index of observation
+  // Variable to store shortest distance from observation and index of observation
   vector<int> obsIndex[predicted.size()];
   vector<double> obsDist[predicted.size()];
   
   //Loop through each observation to find nearest landmark
   for(unsigned int i=0; i< observations.size();++i) {
+    //Reset value for distance and index for finding sortest distance
+    double distance=100;
+    unsigned int closest_landmark=predicted.size();
     
     // Observation coordinates
     double obs_x=observations[i].x;
     double obs_y=observations[i].y;
-    
-    double distance=100;
-    int closest_landmark=predicted.size();
+
     //Find closest landmark
     for(unsigned int j=0; j< predicted.size();++j) {
+      //Landmark coordinates
       double landmark_x=predicted[j].x;
       double landmark_y=predicted[j].y;
       
@@ -144,27 +155,31 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
         distance=temp_dist;
         closest_landmark=j;
       }
-    }
-    
-    //Collect all the observations to particular landmark
-    if(closest_landmark < predicted.size()) {
-      
+    }   
+    //push observations to closest landmark vector array
+    if(closest_landmark < predicted.size()) {    
       obsIndex[closest_landmark].push_back(i);
       obsDist[closest_landmark].push_back(distance);
     }
   }
   
+  //Traverse through array to find nearest neighbor to each landmark
   for (unsigned int k=0; k< predicted.size(); ++k) {
-    if (obsIndex[k].size() > 0) {
+    
+    //Proceed only if observations collected for given landmark
+    if (!obsIndex[k].empty()) {
       vector<int> associtionIndex;
       vector<double> associtionDist;
       
+      //Reset value for distance and index for finding sortest distance
+      double distance=100;
+      unsigned int index=observations.size();
+      
+      //Get indeces off of observations around this landmark
       associtionIndex=obsIndex[k];
       associtionDist=obsDist[k];
       
-      double distance=100;
-      int index=observations.size();
-      
+      //Loop through indeices to find nearest neighbor
       for(unsigned int z=0; z< associtionIndex.size(); ++z) {
         if(associtionDist[z] < distance) {
           distance=associtionDist[z];
@@ -172,19 +187,23 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
         }        
       }
       
+      //Assign association
       if(index < observations.size()) {
         LandmarkObs  foundAssociation;
+
+        //Index of associated landmark
         foundAssociation.id=k;
+        //Coordinate of associated observations
         foundAssociation.x=observations[index].x;
         foundAssociation.y=observations[index].y;
-        //std::cout << "Observation " << index << " coord  (" << observations[index].x << "," << observations[index].y << ")" << std::endl;
-        //std::cout << "Landmark " << k  << " coord  (" << predicted[k].x << "," << predicted[k].y << ")" << std::endl;
+
+        //Push the observations to vecotor
         validobs.push_back(foundAssociation);
       }
     }
   }
+  //Update association
   observations=validobs;
- //std::cout << "I was here 111";
 }
 
 
@@ -204,109 +223,115 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
    *   and the following is a good resource for the actual equation to implement
    *   (look at equation 3.33) http://planning.cs.uiuc.edu/node99.html
    */
-  //radom noise in measurement
-  
-  std::normal_distribution<double> dist_x(0, std_landmark[0]);
-  std::normal_distribution<double> dist_y(0, std_landmark[1]);
-   
-   
-  //Store land marks Predicted observations 
+ 
+  //Store landmarks Predicted observations 
   vector<LandmarkObs> predicted_obs;
   for (unsigned int i=0; i <map_landmarks.landmark_list.size(); ++i) {
     LandmarkObs obs;
+    obs.id=map_landmarks.landmark_list[i].id_i;
     obs.x=map_landmarks.landmark_list[i].x_f;
     obs.y=map_landmarks.landmark_list[i].y_f;
-    //std::cout << "I was here 11" << std::endl;
     predicted_obs.push_back(obs);
   }
-  
-   
+     
   vector<double> weights_temp;
   
   //Process each particle for calculating weigth
   for (unsigned int p=0; p< particles.size(); ++p) {
- 	
     
-    particles[p].weight=1;
+    //Vector to store processed particles to save calculation effore
+    vector<LandmarkObs> processPartcle;
     
-    vector<int> prtclassociations;
-  vector<double> prtclsense_x;
-  vector<double> prtclsense_y;
-     
+    //Flag to indicate weight calculation should bre performed
+    bool notProcessed=true;
     
-    
-    //Add noise to sensed measurement data
-    vector<LandmarkObs> prtclObs_mapcoord;
-    for(unsigned int k=0; k < observations.size(); ++k) {
-      LandmarkObs Obs_mapcoord;
-     //std::cout << "Obs "<< k <<"   cord is   ("<< observations[k].x << "," <<observations[k].y << ")" << std::endl;
-      if(observations[k].x < sensor_range && observations[k].y <sensor_range) {
-        //Add gaussian noise to measuremnet
-        double x_c=observations[k].x;// +dist_x(gen);
-        double y_c=observations[k].y;// +dist_y(gen);
-        
-    	
-        //Transform coordinates to map frame
-        Obs_mapcoord.x= (x_c*cos(particles[p].theta)) - (y_c*sin(particles[p].theta)) + particles[p].x;
-        Obs_mapcoord.y= (x_c*sin(particles[p].theta)) + (y_c*cos(particles[p].theta)) + particles[p].y;
-        
-		//std::cout << "I was here 9" << std::endl;
-        prtclObs_mapcoord.push_back(Obs_mapcoord);
+    if (!processPartcle.empty()) {      
+      for(unsigned int j=0; j < processPartcle.size(); ++j) {
+        if ((processPartcle[j].x == particles[p].x) && (processPartcle[j].y == particles[p].y)) {
+          notProcessed=false;
+          break;
+        }
       }
     }
     
-    //std::cout << "I was here 8" << std::endl;
-    //Associate observations to landmarks where each predicted observations has index of transformed observation
-    dataAssociation(predicted_obs,prtclObs_mapcoord);
-     //std::cout << "I was here 7" << std::endl; 
-    
-    //Calculate weight
-    for(unsigned int z=0; z < prtclObs_mapcoord.size(); ++z) {
-      double obs_x=prtclObs_mapcoord[z].x;
-      double obs_y=prtclObs_mapcoord[z].y;
+    if (notProcessed) {
+      
+      //Variable for setting association
+      vector<int> prtclassociations;
+      vector<double> prtclsense_x;
+      vector<double> prtclsense_y;
+      
+      //Initialise weight for this particle
+      particles[p].weight=1;
 
-      //Associated observation as x,y
-      int index=prtclObs_mapcoord[z].id;
+      //Add noise to sensed measurement data
+      vector<LandmarkObs> prtclObs_mapcoord;
       
-      prtclassociations.push_back(index);
-      prtclsense_x.push_back(obs_x);
-      prtclsense_y.push_back(obs_y);
-      
-      
-      //take landmark observation coordinates as mu for multi variate disrbituion
-      double mu_x=predicted_obs[index].x;
-      double mu_y=predicted_obs[index].y;
-		//std::cout << "myxy  (" << mu_x<<",  "<< mu_y  <<")"<< std::endl;
-      //std::cout << "obsxy  (" << obs_x<<",  "<< obs_y <<")"<< std::endl;
-      
-      // calculate normalization term
-      double gauss_norm;
-      gauss_norm = 1 / (2 * M_PI * std_landmark[0] * std_landmark[1]);
-      //std::cout << "I was here 6"<< gauss_norm << std::endl;
-      // calculate exponent
-      double exponent;
-      exponent = (pow(obs_x - mu_x, 2) / (2 * pow(std_landmark[0], 2)))
-               + (pow(obs_y - mu_y, 2) / (2 * pow(std_landmark[1], 2)));
-      //std::cout << "I was here 7"<< exponent << std::endl;
-      // calculate weight using normalization terms and exponent
-      double weight;
-      weight = gauss_norm * exp(-exponent);
-      //std::cout << "exp" << exponent<< std::endl;
-		//std::cout << "weight " << p <<" of obs  "<< z  <<"th"<< "  is  "<<weight << ")"  << std::endl;
-      	//std::cout << "weight " << p <<" after obs  "<< z << "  is  "<<particles[p].weight << ")"  << std::endl;
-      //Final particle weight
-      particles[p].weight=particles[p].weight *weight;
+      //loop through each observation  
+      for(unsigned int k=0; k < observations.size(); ++k) {
+        //Placeholder to store observations in map coordinate
+        LandmarkObs Obs_mapcoord;
+        
+        //Process the observation if within range only
+        if(observations[k].x < sensor_range && observations[k].y <sensor_range) {
+        
+          //Obesrvation in vehicle coordinates
+          double x_c=observations[k].x;
+          double y_c=observations[k].y;
+          
+          //Transform coordinates to map frame
+          Obs_mapcoord.x= (x_c*cos(particles[p].theta)) - (y_c*sin(particles[p].theta)) + particles[p].x;
+          Obs_mapcoord.y= (x_c*sin(particles[p].theta)) + (y_c*cos(particles[p].theta)) + particles[p].y;
+          
+          //Push global coordinate of obsevation into vector
+          prtclObs_mapcoord.push_back(Obs_mapcoord);
+        }
       }
-    
-    weights_temp.push_back(particles[p].weight);
-
-      //std::cout << "weight of   " << p <<"  is  " <<particles[p].weight << ")"  << std::endl;
-    SetAssociations(particles[p],prtclassociations,prtclsense_x,prtclsense_y);
-    //std::cout << "I was here 5  "<< std::endl;
-  }
-  weights=weights_temp;
- //std::cout << "I was here 4" << std::endl;
-  
+      
+      //Associate observations to landmarks where each predicted observations has index of transformed observation
+      dataAssociation(predicted_obs,prtclObs_mapcoord);
+      
+      //Calculate weight of particle through each valid observation
+      for(unsigned int z=0; z < prtclObs_mapcoord.size(); ++z) {
+        //Observation's coordinates in map frame
+        double obs_x=prtclObs_mapcoord[z].x;
+        double obs_y=prtclObs_mapcoord[z].y;
+        
+        //Associated landmarks coordinates
+        int index=prtclObs_mapcoord[z].id;
+        double mu_x=predicted_obs[index].x;
+        double mu_y=predicted_obs[index].y;
+        
+        //Push data for setting association 
+        prtclassociations.push_back(predicted_obs[index].id);
+        prtclsense_x.push_back(obs_x);
+        prtclsense_y.push_back(obs_y);
+        
+        // calculate normalization term
+        double gauss_norm;
+        gauss_norm = 1 / (2 * M_PI * std_landmark[0] * std_landmark[1]);
+        
+        // calculate exponent
+        double exponent;
+        exponent = (pow(obs_x - mu_x, 2) / (2 * pow(std_landmark[0], 2)))
+                   + (pow(obs_y - mu_y, 2) / (2 * pow(std_landmark[1], 2)));
+        
+        // calculate weight using normalization terms and exponent
+        double weight;
+        weight = gauss_norm * exp(-exponent);
+        
+        //Final particle weight
+        particles[p].weight=particles[p].weight *weight;
+      }
+      
+      //Push each particle's final weight into vector
+      weights_temp.push_back(particles[p].weight);
+      
+      //Set association data for each particles
+      SetAssociations(particles[p],prtclassociations,prtclsense_x,prtclsense_y);
+    }
+    weights=weights_temp;
+  }  
 }
 
 void ParticleFilter::resample() {
@@ -316,29 +341,20 @@ void ParticleFilter::resample() {
    * NOTE: You may find std::discrete_distribution helpful here.
    *   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
    */
+  
   //Descrete distribution based on weights
   std::discrete_distribution<int> dist_wght(weights.begin(), weights.end());
-  //std::cout << "I was here 31   "<< weights.size() << std::endl;
-
-  //std::cout << "all weights (" ;
-  
-  //for(int check=0; check < weights.size(); ++check) {
-  //  std::cout << weights[check] <<", ";
-  //}
- // std::cout << std::endl;
   
   //Resample particles
   // Set of current particles
   std::vector<Particle> prtcl_resample;
   for(unsigned int n=0; n< particles.size(); ++n) {
     int new_partIndex=dist_wght(gen);
-    //std::cout << "gnerated    " << new_partIndex << std::endl;
-    //std::cout << "I was here 32" << new_partIndex << std::endl;
     prtcl_resample.push_back(particles[new_partIndex]);
-  
   }
+  
+  //Update re-sampled particles
   particles=prtcl_resample;
-  //std::cout << "I was here 3" << std::endl;
 }
 
 void ParticleFilter::SetAssociations(Particle& particle, 
@@ -353,7 +369,6 @@ void ParticleFilter::SetAssociations(Particle& particle,
   particle.associations= associations;
   particle.sense_x = sense_x;
   particle.sense_y = sense_y;
-  //std::cout << "I was here 2" << std::endl;
 }
 
 string ParticleFilter::getAssociations(Particle best) {
@@ -362,7 +377,6 @@ string ParticleFilter::getAssociations(Particle best) {
   copy(v.begin(), v.end(), std::ostream_iterator<int>(ss, " "));
   string s = ss.str();
   s = s.substr(0, s.length()-1);  // get rid of the trailing space
-  //std::cout << "I was here 1" << std::endl;
   
   return s;
 }
@@ -381,6 +395,5 @@ string ParticleFilter::getSenseCoord(Particle best, string coord) {
   string s = ss.str();
   s = s.substr(0, s.length()-1);  // get rid of the trailing space
   
-  //std::cout << "I was here 0" << std::endl;
   return s;
 }
